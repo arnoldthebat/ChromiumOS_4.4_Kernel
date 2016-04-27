@@ -15,8 +15,10 @@ struct vc4_dev {
 	struct vc4_hdmi *hdmi;
 	struct vc4_hvs *hvs;
 	struct vc4_crtc *crtc[3];
+	struct vc4_v3d *v3d;
 
 	struct drm_fbdev_cma *fbdev;
+	struct rpi_firmware *firmware;
 
 	struct vc4_hang_state *hang_state;
 
@@ -50,6 +52,53 @@ struct vc4_dev {
 
 	/* Protects bo_cache and the BO stats. */
 	struct mutex bo_lock;
+
+	/* Sequence number for the last job queued in job_list.
+	 * Starts at 0 (no jobs emitted).
+	 */
+	uint64_t emit_seqno;
+
+	/* Sequence number for the last completed job on the GPU.
+	 * Starts at 0 (no jobs completed).
+	 */
+	uint64_t finished_seqno;
+
+	/* List of all struct vc4_exec_info for jobs to be executed.
+	 * The first job in the list is the one currently programmed
+	 * into ct0ca/ct1ca for execution.
+	 */
+	struct list_head job_list;
+	/* List of the finished vc4_exec_infos waiting to be freed by
+	 * job_done_work.
+	 */
+	struct list_head job_done_list;
+	/* Spinlock used to synchronize the job_list and seqno
+	 * accesses between the IRQ handler and GEM ioctls.
+	 */
+	spinlock_t job_lock;
+	wait_queue_head_t job_wait_queue;
+	struct work_struct job_done_work;
+
+	/* List of struct vc4_seqno_cb for callbacks to be made from a
+	 * workqueue when the given seqno is passed.
+	 */
+	struct list_head seqno_cb_list;
+
+	/* The binner overflow memory that's currently set up in
+	 * BPOA/BPOS registers.  When overflow occurs and a new one is
+	 * allocated, the previous one will be moved to
+	 * vc4->current_exec's free list.
+	 */
+	struct vc4_bo *overflow_mem;
+	struct work_struct overflow_mem_work;
+
+	struct {
+		uint32_t last_ct0ca, last_ct1ca;
+		struct timer_list timer;
+		struct work_struct reset_work;
+	} hangcheck;
+
+	struct semaphore async_modeset;
 };
 
 static inline struct vc4_dev *
@@ -61,6 +110,9 @@ to_vc4_dev(struct drm_device *dev)
 struct vc4_bo {
 	struct drm_gem_cma_object base;
 
+	/* seqno of the last job to render to this BO. */
+	uint64_t seqno;
+
 	/* List entry for the BO's position in either
 	 * vc4_exec_info->unref_list or vc4_dev->bo_cache.time_list
 	 */
@@ -71,6 +123,11 @@ struct vc4_bo {
 
 	/* List entry for the BO's position in vc4_dev->bo_cache.size_list */
 	struct list_head size_head;
+
+	/* Struct for shader validation state, if created by
+	 * DRM_IOCTL_VC4_CREATE_SHADER_BO.
+	 */
+	struct vc4_validated_shader_info *validated_shader;
 };
 
 static inline struct vc4_bo *
@@ -93,17 +150,7 @@ struct vc4_v3d {
 struct vc4_hvs {
 	struct platform_device *pdev;
 	void __iomem *regs;
-	u32 __iomem *dlist;
-
-	/* Memory manager for CRTCs to allocate space in the display
-	 * list.  Units are dwords.
-	 */
-	struct drm_mm dlist_mm;
-	/* Memory manager for the LBM memory used by HVS scaling. */
-	struct drm_mm lbm_mm;
-	spinlock_t mm_lock;
-
-	struct drm_mm_node mitchell_netravali_filter;
+	void __iomem *dlist;
 };
 
 struct vc4_plane {
@@ -145,11 +192,6 @@ to_vc4_encoder(struct drm_encoder *encoder)
 struct vc4_exec_info {
 	/* Sequence number for this bin/render job. */
 	uint64_t seqno;
-
-	/* Last current addresses the hardware was processing when the
-	 * hangcheck timer checked on us.
-	 */
-	uint32_t last_ct0ca, last_ct1ca;
 
 	/* Kernel-space copy of the ioctl arguments */
 	struct drm_vc4_submit_cl *args;
@@ -235,20 +277,11 @@ struct vc4_exec_info {
 };
 
 static inline struct vc4_exec_info *
-vc4_first_bin_job(struct vc4_dev *vc4)
+vc4_first_job(struct vc4_dev *vc4)
 {
-	if (list_empty(&vc4->bin_job_list))
+	if (list_empty(&vc4->job_list))
 		return NULL;
-	return list_first_entry(&vc4->bin_job_list, struct vc4_exec_info, head);
-}
-
-static inline struct vc4_exec_info *
-vc4_first_render_job(struct vc4_dev *vc4)
-{
-	if (list_empty(&vc4->render_job_list))
-		return NULL;
-	return list_first_entry(&vc4->render_job_list,
-				struct vc4_exec_info, head);
+	return list_first_entry(&vc4->job_list, struct vc4_exec_info, head);
 }
 
 /**
@@ -325,6 +358,17 @@ int vc4_dumb_create(struct drm_file *file_priv,
 		    struct drm_mode_create_dumb *args);
 struct dma_buf *vc4_prime_export(struct drm_device *dev,
 				 struct drm_gem_object *obj, int flags);
+int vc4_create_bo_ioctl(struct drm_device *dev, void *data,
+			struct drm_file *file_priv);
+int vc4_create_shader_bo_ioctl(struct drm_device *dev, void *data,
+			       struct drm_file *file_priv);
+int vc4_mmap_bo_ioctl(struct drm_device *dev, void *data,
+		      struct drm_file *file_priv);
+int vc4_get_hang_state_ioctl(struct drm_device *dev, void *data,
+			     struct drm_file *file_priv);
+int vc4_mmap(struct file *filp, struct vm_area_struct *vma);
+int vc4_prime_mmap(struct drm_gem_object *obj, struct vm_area_struct *vma);
+void *vc4_prime_vmap(struct drm_gem_object *obj);
 void vc4_bo_cache_init(struct drm_device *dev);
 void vc4_bo_cache_destroy(struct drm_device *dev);
 int vc4_bo_stats_debugfs(struct seq_file *m, void *arg);
@@ -352,9 +396,7 @@ int vc4_wait_seqno_ioctl(struct drm_device *dev, void *data,
 			 struct drm_file *file_priv);
 int vc4_wait_bo_ioctl(struct drm_device *dev, void *data,
 		      struct drm_file *file_priv);
-void vc4_submit_next_bin_job(struct drm_device *dev);
-void vc4_submit_next_render_job(struct drm_device *dev);
-void vc4_move_job_to_render(struct drm_device *dev, struct vc4_exec_info *exec);
+void vc4_submit_next_job(struct drm_device *dev);
 int vc4_wait_for_seqno(struct drm_device *dev, uint64_t seqno,
 		       uint64_t timeout_ns, bool interruptible);
 void vc4_job_handle_completed(struct vc4_dev *vc4);

@@ -115,12 +115,12 @@ static struct drm_driver vc4_drm_driver = {
 	.prime_handle_to_fd = drm_gem_prime_handle_to_fd,
 	.prime_fd_to_handle = drm_gem_prime_fd_to_handle,
 	.gem_prime_import = drm_gem_prime_import,
-	.gem_prime_export = drm_gem_prime_export,
+	.gem_prime_export = vc4_prime_export,
 	.gem_prime_get_sg_table	= drm_gem_cma_prime_get_sg_table,
 	.gem_prime_import_sg_table = drm_gem_cma_prime_import_sg_table,
-	.gem_prime_vmap = drm_gem_cma_prime_vmap,
+	.gem_prime_vmap = vc4_prime_vmap,
 	.gem_prime_vunmap = drm_gem_cma_prime_vunmap,
-	.gem_prime_mmap = drm_gem_cma_prime_mmap,
+	.gem_prime_mmap = vc4_prime_mmap,
 
 	.dumb_create = vc4_dumb_create,
 	.dumb_map_offset = drm_gem_cma_dumb_map_offset,
@@ -194,7 +194,7 @@ static int vc4_drm_bind(struct device *dev)
 	vc4->dev = drm;
 	drm->dev_private = vc4;
 
-	vc4_bo_cache_init(drm);
+	drm_dev_set_unique(drm, dev_name(dev));
 
 	vc4_bo_cache_init(drm);
 
@@ -230,6 +230,8 @@ unregister:
 	drm_dev_unregister(drm);
 unbind_all:
 	component_unbind_all(dev, drm);
+gem_destroy:
+	vc4_gem_destroy(drm);
 unref:
 	drm_dev_unref(drm);
 	vc4_bo_cache_destroy(drm);
