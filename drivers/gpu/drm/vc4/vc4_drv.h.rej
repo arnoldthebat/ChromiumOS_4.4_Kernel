@@ -1,0 +1,35 @@
+--- drivers/gpu/drm/vc4/vc4_drv.h
++++ drivers/gpu/drm/vc4/vc4_drv.h
+@@ -53,7 +53,7 @@ struct vc4_dev {
+ 	/* Protects bo_cache and the BO stats. */
+ 	struct mutex bo_lock;
+ 
+-	/* Sequence number for the last job queued in job_list.
++	/* Sequence number for the last job queued in bin_job_list.
+ 	 * Starts at 0 (no jobs emitted).
+ 	 */
+ 	uint64_t emit_seqno;
+@@ -63,11 +63,19 @@ struct vc4_dev {
+ 	 */
+ 	uint64_t finished_seqno;
+ 
+-	/* List of all struct vc4_exec_info for jobs to be executed.
+-	 * The first job in the list is the one currently programmed
+-	 * into ct0ca/ct1ca for execution.
++	/* List of all struct vc4_exec_info for jobs to be executed in
++	 * the binner.  The first job in the list is the one currently
++	 * programmed into ct0ca for execution.
+ 	 */
+-	struct list_head job_list;
++	struct list_head bin_job_list;
++
++	/* List of all struct vc4_exec_info for jobs that have
++	 * completed binning and are ready for rendering.  The first
++	 * job in the list is the one currently programmed into ct1ca
++	 * for execution.
++	 */
++	struct list_head render_job_list;
++
+ 	/* List of the finished vc4_exec_infos waiting to be freed by
+ 	 * job_done_work.
+ 	 */

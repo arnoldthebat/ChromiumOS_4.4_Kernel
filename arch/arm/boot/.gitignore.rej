@@ -1,0 +1,8 @@
+--- arch/arm/boot/.gitignore
++++ arch/arm/boot/.gitignore
+@@ -3,4 +3,4 @@ zImage
+ xipImage
+ bootpImage
+ uImage
+-*.dtb
++*.dtb*

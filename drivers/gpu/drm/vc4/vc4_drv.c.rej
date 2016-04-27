@@ -1,0 +1,10 @@
+--- drivers/gpu/drm/vc4/vc4_drv.c
++++ drivers/gpu/drm/vc4/vc4_drv.c
+@@ -108,6 +109,7 @@ static struct drm_driver vc4_drm_driver = {
+ 	.debugfs_cleanup = vc4_debugfs_cleanup,
+ #endif
+ 
++	.gem_create_object = vc4_create_object,
+ 	.gem_free_object = vc4_free_object,
+ 	.gem_vm_ops = &drm_gem_cma_vm_ops,
+ 

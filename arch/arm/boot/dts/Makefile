@@ -1,5 +1,26 @@
 ifeq ($(CONFIG_OF),y)
 
+dtb-$(CONFIG_ARCH_BCM2708) += bcm2708-rpi-b.dtb
+dtb-$(CONFIG_ARCH_BCM2708) += bcm2708-rpi-b-plus.dtb
+dtb-$(CONFIG_ARCH_BCM2708) += bcm2708-rpi-cm.dtb
+dtb-$(CONFIG_ARCH_BCM2835) += bcm2835-rpi-cm.dtb
+dtb-$(CONFIG_ARCH_BCM2709) += bcm2709-rpi-2-b.dtb
+dtb-$(CONFIG_ARCH_BCM2709) += bcm2710-rpi-3-b.dtb
+
+# Raspberry Pi
+ifeq ($(CONFIG_ARCH_BCM2708),y)
+   RPI_DT_OVERLAYS=y
+endif
+ifeq ($(CONFIG_ARCH_BCM2709),y)
+   RPI_DT_OVERLAYS=y
+endif
+ifeq ($(CONFIG_ARCH_BCM2835),y)
+   RPI_DT_OVERLAYS=y
+endif
+ifeq ($(RPI_DT_OVERLAYS),y)
+    dts-dirs += overlays
+endif
+
 dtb-$(CONFIG_ARCH_ALPINE) += \
 	alpine-db.dtb
 dtb-$(CONFIG_MACH_ASM9260) += \

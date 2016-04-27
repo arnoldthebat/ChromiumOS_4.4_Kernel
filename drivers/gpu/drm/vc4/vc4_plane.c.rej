@@ -1,0 +1,26 @@
+--- drivers/gpu/drm/vc4/vc4_plane.c
++++ drivers/gpu/drm/vc4/vc4_plane.c
+@@ -840,12 +972,20 @@ struct drm_plane *vc4_plane_init(struct drm_device *dev,
+ 		goto fail;
+ 	}
+ 
+-	for (i = 0; i < ARRAY_SIZE(hvs_formats); i++)
+-		formats[i] = hvs_formats[i].drm;
++	for (i = 0; i < ARRAY_SIZE(hvs_formats); i++) {
++		/* Don't allow YUV in cursor planes, since that means
++		 * tuning on the scaler, which we don't allow for the
++		 * cursor.
++		 */
++		if (type != DRM_PLANE_TYPE_CURSOR ||
++		    hvs_formats[i].hvs < HVS_PIXEL_FORMAT_YCBCR_YUV420_3PLANE) {
++			formats[num_formats++] = hvs_formats[i].drm;
++		}
++	}
+ 	plane = &vc4_plane->base;
+ 	ret = drm_universal_plane_init(dev, plane, 0xff,
+ 				       &vc4_plane_funcs,
+-				       formats, ARRAY_SIZE(formats),
++				       formats, num_formats,
+ 				       type);
+ 
+ 	drm_plane_helper_add(plane, &vc4_plane_helper_funcs);
